@@ -310,6 +310,17 @@ def is_tempo_tasks_path(path: str) -> bool:
         return path == "tasks/tempo-v1"
 
 
+def is_checkout_tasks_path(path: str) -> bool:
+    return Path(path).resolve().is_relative_to(Path("tasks/checkout-v1").resolve())
+
+
+def has_checkout_tasks() -> bool:
+    return any(
+        task_file.is_file()
+        for task_file in Path("tasks/checkout-v1").glob("*/task.toml")
+    )
+
+
 def ensure_mpp_docs_bundle(options: dict[str, Any]) -> str | None:
     source = options.get("mpp_docs_source")
     if not source:
@@ -330,6 +341,12 @@ def ensure_mpp_docs_bundle(options: dict[str, Any]) -> str | None:
 
 
 def preflight(variant: dict[str, Any], options: dict[str, Any]) -> None:
+    if (
+        options.get("tasks")
+        and is_checkout_tasks_path(options["tasks"])
+        and options.get("task_suite") != "checkout"
+    ):
+        raise RuntimeError("Checkout task paths require --task-suite checkout")
     if options.get("task_suite") == "checkout":
         if not os.environ.get("STRIPE_TEST_SECRET_KEY", "").startswith("sk_test_"):
             raise RuntimeError(
@@ -337,6 +354,8 @@ def preflight(variant: dict[str, Any], options: dict[str, Any]) -> None:
             )
         if not os.environ.get("CHECKOUT_LINK_TEST_EMAIL"):
             raise RuntimeError("Checkout runs require CHECKOUT_LINK_TEST_EMAIL")
+        if not has_checkout_tasks():
+            raise RuntimeError("Checkout has no authored task yet")
     effective_agents = effective_agent_names(variant, options)
     needs_agent_auth = variant.get("needs_agent_auth") and effective_agents
     if needs_agent_auth and "claude-code" in effective_agents and not has_claude_auth():
@@ -863,7 +882,14 @@ def apply_task_suite(
 ) -> dict[str, Any]:
     config["datasets"] = datasets_for_suite(task_suite or "tempo")
     if task_suite == "checkout":
-        config.setdefault("verifier", {})["env"] = {}
+        verifier_env = config.setdefault("verifier", {}).setdefault("env", {})
+        for name in (
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "REWARDKIT_JUDGE",
+        ):
+            verifier_env.pop(name, None)
     return config
 
 
@@ -872,10 +898,6 @@ def apply_task_filter(
     task_filter: str | None,
 ) -> dict[str, Any]:
     if not task_filter:
-        return config
-
-    if mpp_filter := mpp_task_filter(task_filter):
-        config["datasets"] = [{"path": "tasks/mpp", "task_names": [mpp_filter]}]
         return config
 
     if any(
@@ -888,6 +910,10 @@ def apply_task_filter(
                 "task_names": [task_filter.removeprefix("checkout-v1/")],
             }
         ]
+        return config
+
+    if mpp_filter := mpp_task_filter(task_filter):
+        config["datasets"] = [{"path": "tasks/mpp", "task_names": [mpp_filter]}]
         return config
 
     tempo_prefixes = ("tempo-v1/", "tempo-mcp-v1/", "tempo/")
