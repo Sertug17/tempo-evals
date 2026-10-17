@@ -11,9 +11,6 @@ services:
         condition: service_completed_successfully
     volumes:
       - checkout-wallet:/wallet:ro
-    environment:
-      CHECKOUT_ORACLE_PAYMENT_METHOD: ${CHECKOUT_ORACLE_PAYMENT_METHOD:-}
-
   wallet:
     build:
       context: ./wallet
@@ -50,7 +47,7 @@ services:
       STRIPE_TEST_SECRET_KEY: ${STRIPE_TEST_SECRET_KEY:?Stripe sandbox key is required}
       PUBLIC_BASE_URL: http://merchant:3000
     volumes:
-      - checkout-wallet:/wallet:ro
+      - checkout-wallet:/wallet
     restart: "no"
 
   browser:

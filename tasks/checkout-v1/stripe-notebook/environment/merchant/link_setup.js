@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { randomInt } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const key = process.env.STRIPE_TEST_SECRET_KEY;
 if (!key?.startsWith('sk_test_')) throw new Error('A Stripe sandbox secret key is required');
@@ -46,19 +47,6 @@ async function stripe(path, options = {}) {
 }
 
 async function main() {
-  const form = new URLSearchParams({
-    mode: 'setup',
-    'payment_method_types[0]': 'card',
-    'payment_method_types[1]': 'link',
-    customer_email: wallet.link.email,
-    success_url: `${base}/`,
-    cancel_url: `${base}/`,
-  });
-  const session = await stripe('/checkout/sessions', { method: 'POST', body: form });
-  if (!session.id?.startsWith('cs_test_') || !session.url || session.livemode !== false) {
-    throw new Error('Stripe did not create a sandbox Link setup session');
-  }
-
   await browserRpc('initialize', {
     protocolVersion: '2025-03-26',
     capabilities: {},
@@ -70,37 +58,71 @@ async function main() {
     throw new Error('Pinned browser lacks browser_run_code_unsafe');
   }
   const card = wallet.card;
-  const script = `async (page) => {
+  const triedPhones = new Set();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let phone = wallet.link.phone;
+    while (triedPhones.has(phone)) {
+      phone = wallet.link.phone.slice(0, 8) + String(randomInt(100)).padStart(2, '0');
+    }
+    triedPhones.add(phone);
+    const form = new URLSearchParams({
+      mode: 'setup',
+      currency: 'usd',
+      'payment_method_types[0]': 'card',
+      'payment_method_types[1]': 'link',
+      customer_email: wallet.link.email,
+      success_url: `${base}/`,
+      cancel_url: `${base}/`,
+    });
+    const session = await stripe('/checkout/sessions', { method: 'POST', body: form });
+    if (!session.id?.startsWith('cs_test_') || !session.url || session.livemode !== false) {
+      throw new Error('Stripe did not create a sandbox Link setup session');
+    }
+    const script = `async (page) => {
     await page.goto(${JSON.stringify(session.url)});
-    await page.getByRole('textbox', { name: 'Card number' }).fill(${JSON.stringify(card.number)});
-    await page.getByRole('textbox', { name: 'Expiration' }).fill(${JSON.stringify(card.expMonth + String(card.expYear).slice(-2))});
-    await page.getByRole('textbox', { name: /CVC/ }).fill(${JSON.stringify(card.cvc)});
-    await page.getByRole('textbox', { name: 'Cardholder name' }).fill('Tempo Test Buyer');
-    await page.getByRole('textbox', { name: 'ZIP' }).fill('94103');
+    const fill = async (name, value) => {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        for (const frame of [page, ...page.frames()]) {
+          const field = frame.getByRole('textbox', { name }).first();
+          if (await field.count()) { await field.fill(value); return; }
+        }
+        await page.waitForTimeout(500);
+      }
+      throw new Error('Missing Link setup field: ' + name);
+    };
+    await fill('Card number', ${JSON.stringify(card.number)});
+    await fill('Expiration', ${JSON.stringify(card.expMonth + String(card.expYear).slice(-2))});
+    await fill(/CVC/, ${JSON.stringify(card.cvc)});
+    await fill('Cardholder name', 'Tempo Test Buyer');
+    await fill('ZIP', '94103');
     const saveWithLink = page.getByRole('checkbox', { name: /Save my information with Link/ });
-    if (!await saveWithLink.isVisible()) throw new Error('Link enrollment is unavailable');
+    await saveWithLink.waitFor({ state: 'visible', timeout: 30000 });
     await saveWithLink.check();
-    await page.getByRole('textbox', { name: 'Phone number' }).fill(${JSON.stringify(wallet.link.phone)});
+    await page.getByRole('textbox', { name: 'Phone number' }).fill(${JSON.stringify(phone)});
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.waitForURL(${JSON.stringify(base + '/')}, { timeout: 60000 });
     return 'Link setup returned to merchant';
   }`;
-  const result = await browserRpc('tools/call', {
-    name: 'browser_run_code_unsafe', arguments: { code: script },
-  });
-  if (result.isError) throw new Error('Browser Link enrollment failed');
+    const result = await browserRpc('tools/call', {
+      name: 'browser_run_code_unsafe', arguments: { code: script },
+    });
+    if (result.isError) continue;
 
-  const verified = await stripe(`/checkout/sessions/${session.id}?expand[]=setup_intent.payment_method`);
-  const setup = verified.setup_intent;
-  const paymentMethod = setup?.payment_method;
-  if (
-    verified.livemode !== false || verified.mode !== 'setup' || verified.status !== 'complete'
-    || setup?.status !== 'succeeded' || paymentMethod?.livemode !== false
-    || paymentMethod?.type !== 'link' || paymentMethod.link?.email !== wallet.link.email
-  ) {
-    throw new Error('Stripe did not verify an isolated Link account with a saved test card');
+    const verified = await stripe(`/checkout/sessions/${session.id}?expand[]=setup_intent.payment_method`);
+    const setup = verified.setup_intent;
+    const paymentMethod = setup?.payment_method;
+    if (
+      verified.livemode !== false || verified.mode !== 'setup' || verified.status !== 'complete'
+      || setup?.status !== 'succeeded' || paymentMethod?.livemode !== false
+      || paymentMethod?.type !== 'link' || paymentMethod.link?.email !== wallet.link.email
+    ) continue;
+
+    wallet.link.phone = phone;
+    writeFileSync('/wallet/wallet.json', JSON.stringify(wallet, null, 2) + '\n');
+    console.log('Trial Link sandbox identity enrolled and verified');
+    return;
   }
-  console.log('Trial Link sandbox identity enrolled and verified');
+  throw new Error('Link enrollment did not succeed with three trial phone numbers');
 }
 
 main().catch(error => {
