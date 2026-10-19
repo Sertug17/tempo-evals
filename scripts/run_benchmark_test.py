@@ -240,6 +240,34 @@ class RunBenchmarkTest(unittest.TestCase):
         ):
             preflight({}, {"task_suite": "checkout", "task_filter": "mpp-notebook"})
 
+    def test_x402_checkout_preflight_requires_funding_wallet(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            self.assertRaisesRegex(RuntimeError, "X402_FUNDING_PRIVATE_KEY"),
+        ):
+            preflight({}, {"task_suite": "checkout", "task_filter": "x402-notebook"})
+        with patch.dict(
+            os.environ,
+            {
+                "X402_FUNDING_PRIVATE_KEY": "0x" + "1" * 64,
+                "X402_RECIPIENT_ADDRESS": "0x" + "2" * 40,
+            },
+            clear=True,
+        ):
+            preflight({}, {"task_suite": "checkout", "task_filter": "x402-notebook"})
+
+    def test_x402_checkout_rejects_parallel_trials(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "require --concurrency 1"):
+            run_benchmark_variant(
+                "daytona-oracle",
+                {
+                    "task_suite": "checkout",
+                    "task_filter": "x402-notebook",
+                    "concurrency": "2",
+                    "profile": "docs",
+                },
+            )
+
     def test_paypal_checkout_preflight_requires_sandbox_credentials(self) -> None:
         with (
             patch.dict(os.environ, {}, clear=True),
