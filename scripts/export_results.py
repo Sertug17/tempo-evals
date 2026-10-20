@@ -75,6 +75,9 @@ CHECKOUT_TRIAL_COLUMNS = [
     "payment_method",
     "payment_provider_type",
     "verification_reason",
+    "extra_checkout_attempts",
+    "trajectory_duration_sec",
+    "quality_unavailable",
 ]
 
 SUMMARY_COLUMNS = [
@@ -395,6 +398,11 @@ def parse_trial_result(file_path: Path, context: JsonObject) -> JsonObject | Non
         if checkout
         else {}
     )
+    efficiency = (
+        as_object(read_json(file_path.parent / "verifier" / "efficiency.json"))
+        if checkout
+        else {}
+    )
     docs_source = result_docs_source(result, task["profile"], context)
     rewards = extract_rewards(result)
     reward = primary_reward(rewards)
@@ -464,7 +472,11 @@ def parse_trial_result(file_path: Path, context: JsonObject) -> JsonObject | Non
         "input_tokens": tokens["input"],
         "cache_tokens": tokens["cache"],
         "output_tokens": tokens["output"],
-        "model_turns": model_turns(result, file_path),
+        "model_turns": (
+            turns
+            if (turns := model_turns(result, file_path)) != ""
+            else efficiency.get("model_turns", "")
+        ),
         "mcp_calls": trace["calls"],
         "mcp_denied_calls": trace["denied"],
         "mcp_latency_ms": trace["latency"],
@@ -483,6 +495,13 @@ def parse_trial_result(file_path: Path, context: JsonObject) -> JsonObject | Non
                     checkout_details.get("payment_provider_type")
                 ),
                 "verification_reason": as_string(checkout_details.get("reason")),
+                "extra_checkout_attempts": checkout_details.get(
+                    "extra_checkout_attempts"
+                ),
+                "trajectory_duration_sec": efficiency.get(
+                    "trajectory_duration_sec", ""
+                ),
+                "quality_unavailable": as_string(efficiency.get("unavailable")),
             }
             if checkout
             else {}
@@ -599,6 +618,10 @@ def summarize_rows(rows: list[JsonObject]) -> list[JsonObject]:
             result["pass_5"] = (
                 comb(n_passed, 5) / comb(n_trials, 5) if n_trials >= 5 else ""
             )
+            # Do not average failures with zero quality while omitting unscored passes.
+            if result["n_quality_scored"] < n_trials:
+                for column in ("mean_quality", "median_quality", "quality_at_k"):
+                    result[column] = ""
     return results
 
 
@@ -608,6 +631,7 @@ def summarize_quality(rows: list[JsonObject]) -> list[JsonObject]:
 
     frame = pd.DataFrame(rows)
     frame["_quality"] = pd.to_numeric(frame["quality"], errors="coerce")
+    frame["_checkout"] = frame["task_family"].str.startswith("checkout-v1/")
     group_columns = ["run_id", "job_name", "model", "agent", "profile"]
     task_quality = frame.groupby(
         [*group_columns, "task_family"], as_index=False, sort=False
@@ -620,6 +644,7 @@ def summarize_quality(rows: list[JsonObject]) -> list[JsonObject]:
             n_quality_scored=("_quality", "count"),
             mean_quality=("_quality", "mean"),
             median_quality=("_quality", "median"),
+            _checkout=("_checkout", "max"),
         )
         .merge(
             task_quality.groupby(group_columns, as_index=False, sort=False).agg(
@@ -634,7 +659,11 @@ def summarize_quality(rows: list[JsonObject]) -> list[JsonObject]:
         )
     )
     for column in ("mean_quality", "median_quality", "quality_at_k"):
-        summary[column] = summary[column].where(summary[column].notna(), "")
+        summary[column] = summary[column].where(
+            summary[column].notna()
+            & ~(summary["_checkout"] & (summary["quality_coverage"] < 1)),
+            "",
+        )
     return summary[QUALITY_SUMMARY_COLUMNS].to_dict("records")
 
 

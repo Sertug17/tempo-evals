@@ -21,6 +21,7 @@ const proxy = Proxy.create({
   }],
 });
 const log = '/var/log/checkout/deliveries.jsonl';
+const attemptsLog = '/var/log/checkout/attempts.jsonl';
 mkdirSync('/var/log/checkout', { recursive: true });
 writeFileSync('/var/log/checkout/merchant.json', JSON.stringify({ recipient, ousd }));
 const page = '<!doctype html><html><head><meta charset="utf-8"><title>Notebook Store</title></head><body><main><h1>Tempo Notebook</h1><p>One notebook · $12.00</p><a href="/buy">Buy notebook</a></main></body></html>';
@@ -37,6 +38,13 @@ http.createServer(async (request, response) => {
   if (path === '/health') return response.writeHead(200).end('ok');
   if (path === '/' && request.method === 'GET') return response.writeHead(200, { 'content-type': 'text/html' }).end(page);
   if (path === '/buy' && request.method === 'GET') {
+    if (/^Payment\s/i.test(request.headers.authorization || '')) {
+      try {
+        appendFileSync(attemptsLog, JSON.stringify({ paymentAttempt: true }) + '\n');
+      } catch (error) {
+        console.error('Could not record payment attempt', error);
+      }
+    }
     try {
       const incoming = ServerRequest.fromNodeListener(request, response);
       const paid = await proxy.fetch(new Request('http://merchant:3000/notebook/deliver', incoming));

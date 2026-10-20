@@ -6,6 +6,13 @@ import { Receipt } from 'mppx';
 const dir = '/var/log/checkout';
 const { recipient, ousd } = JSON.parse(readFileSync(`${dir}/merchant.json`, 'utf8'));
 let records: { orderId: string; item: string; quantity: number; amount: string; currency: string; receipt: string }[] = [];
+let paymentAttemptCount: number | null = null;
+try {
+  paymentAttemptCount = readFileSync(`${dir}/attempts.jsonl`, 'utf8').trim().split('\n').filter(Boolean)
+    .map(line => JSON.parse(line)).filter(record => record.paymentAttempt === true).length;
+} catch (error) {
+  if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+}
 try {
   records = readFileSync(`${dir}/deliveries.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
 } catch (error) {
@@ -26,4 +33,4 @@ const deliveries = records.map(record => {
     receiptStatus: receipt?.status ?? null, receiptMethod: receipt?.method ?? null,
   };
 });
-writeFileSync(`${dir}/snapshot.json`, JSON.stringify({ recipient, ousd, balance: balance.toString(), decimals, deliveries }, null, 2) + '\n');
+writeFileSync(`${dir}/snapshot.json`, JSON.stringify({ recipient, ousd, balance: balance.toString(), decimals, deliveries, paymentAttemptCount }, null, 2) + '\n');
