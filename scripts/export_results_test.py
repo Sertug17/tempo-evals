@@ -165,7 +165,7 @@ class ExportResultsTest(unittest.TestCase):
                 trial_dir / "result.json",
                 trial(
                     {
-                        "task_name": "checkout-v2/stripe-card-checkout",
+                        "task_name": "checkout-v1/stripe-card-checkout",
                         "verifier_result": {"rewards": {"reward": 1}},
                     }
                 ),
@@ -191,6 +191,22 @@ class ExportResultsTest(unittest.TestCase):
             columns = pd.read_csv(Path(exported["out_dir"]) / "trials.csv").columns
             self.assertIn("payment_provider_type", columns)
             self.assertEqual(exported["summary"][0]["pass_5"], "")
+
+            # Archived v2 jobs retain checkout-specific columns when re-exported.
+            write_json(
+                trial_dir / "result.json",
+                trial(
+                    {
+                        "task_name": "checkout-v2/stripe-card-checkout",
+                        "verifier_result": {"rewards": {"reward": 1}},
+                    }
+                ),
+            )
+            archived = export_results(job_dir)
+            self.assertEqual(
+                archived["trials"][0]["payment_provider_type"], "stripe_sandbox"
+            )
+            self.assertEqual(archived["summary"][0]["pass_5"], "")
 
     def test_checkout_pass_five_uses_independent_trial_outcomes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="checkout-export-") as root:
