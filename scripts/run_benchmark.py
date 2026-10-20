@@ -312,25 +312,25 @@ def is_tempo_tasks_path(path: str) -> bool:
 
 
 def is_checkout_tasks_path(path: str) -> bool:
-    return Path(path).resolve().is_relative_to(Path("tasks/checkout-v1").resolve())
+    return Path(path).resolve().is_relative_to(Path("tasks/checkout-v2").resolve())
 
 
 def has_checkout_tasks() -> bool:
     return any(
         task_file.is_file()
-        for task_file in Path("tasks/checkout-v1").glob("*/task.toml")
+        for task_file in Path("tasks/checkout-v2").glob("*/task.toml")
     )
 
 
 def selected_checkout_tasks(options: dict[str, Any]) -> set[str]:
     names = {
         task_file.parent.name
-        for task_file in Path("tasks/checkout-v1").glob("*/task.toml")
+        for task_file in Path("tasks/checkout-v2").glob("*/task.toml")
     }
     requested_path = options.get("tasks")
     if requested_path and is_checkout_tasks_path(requested_path):
         path = Path(requested_path).resolve()
-        if path != Path("tasks/checkout-v1").resolve():
+        if path != Path("tasks/checkout-v2").resolve():
             names &= {path.name}
     task_filter = options.get("task_filter")
     if task_filter:
@@ -338,7 +338,7 @@ def selected_checkout_tasks(options: dict[str, Any]) -> set[str]:
             name
             for name in names
             if fnmatch.fnmatchcase(name, task_filter)
-            or fnmatch.fnmatchcase(f"checkout-v1/{name}", task_filter)
+            or fnmatch.fnmatchcase(f"checkout-v2/{name}", task_filter)
         }
     return names
 
@@ -373,10 +373,7 @@ def preflight(variant: dict[str, Any], options: dict[str, Any]) -> None:
         if not has_checkout_tasks():
             raise RuntimeError("Checkout has no authored task yet")
         selected = selected_checkout_tasks(options)
-        if selected & {
-            "stripe-card-checkout",
-            "stripe-link-checkout",
-        } and not os.environ.get("STRIPE_TEST_SECRET_KEY", "").startswith("sk_test_"):
+        if not os.environ.get("STRIPE_TEST_SECRET_KEY", "").startswith("sk_test_"):
             raise RuntimeError("Stripe checkout requires STRIPE_TEST_SECRET_KEY")
         if "stripe-link-checkout" in selected and not os.environ.get(
             "STRIPE_TEST_PUBLISHABLE_KEY", ""
@@ -384,25 +381,18 @@ def preflight(variant: dict[str, Any], options: dict[str, Any]) -> None:
             raise RuntimeError(
                 "Stripe Link checkout requires STRIPE_TEST_PUBLISHABLE_KEY"
             )
+        if selected:
+            required = ("PAYPAL_SANDBOX_BUYER_EMAIL", "PAYPAL_SANDBOX_BUYER_PASSWORD")
+            missing = [name for name in required if not os.environ.get(name)]
+            if missing:
+                raise RuntimeError(
+                    f"Checkout wallet setup requires {', '.join(missing)}"
+                )
         if "paypal-checkout" in selected:
-            required = (
-                "PAYPAL_SANDBOX_CLIENT_ID",
-                "PAYPAL_SANDBOX_CLIENT_SECRET",
-                "PAYPAL_SANDBOX_BUYER_EMAIL",
-                "PAYPAL_SANDBOX_BUYER_PASSWORD",
-            )
+            required = ("PAYPAL_SANDBOX_CLIENT_ID", "PAYPAL_SANDBOX_CLIENT_SECRET")
             missing = [name for name in required if not os.environ.get(name)]
             if missing:
                 raise RuntimeError(f"PayPal checkout runs require {', '.join(missing)}")
-        if "x402-usdc-checkout" in selected:
-            if not re.fullmatch(
-                r"0x[0-9a-fA-F]{64}", os.environ.get("X402_FUNDING_PRIVATE_KEY", "")
-            ):
-                raise RuntimeError("x402 checkout requires X402_FUNDING_PRIVATE_KEY")
-            if not re.fullmatch(
-                r"0x[0-9a-fA-F]{40}", os.environ.get("X402_RECIPIENT_ADDRESS", "")
-            ):
-                raise RuntimeError("x402 checkout requires X402_RECIPIENT_ADDRESS")
     effective_agents = effective_agent_names(variant, options)
     needs_agent_auth = variant.get("needs_agent_auth") and effective_agents
     if needs_agent_auth and "claude-code" in effective_agents and not has_claude_auth():
@@ -497,7 +487,7 @@ def task_paths(options: dict[str, Any]) -> list[str]:
         "tempo": "tasks/tempo-v1",
         "tempo-mcp": "tasks/tempo-mcp-v1",
         "mpp": "tasks/mpp",
-        "checkout": "tasks/checkout-v1",
+        "checkout": "tasks/checkout-v2",
     }
     suite = options.get("task_suite") or "tempo"
     return (
@@ -919,7 +909,7 @@ def datasets_for_suite(task_suite: str) -> list[dict[str, Any]]:
     if task_suite == "tempo-mcp":
         return copy.deepcopy(RUN_CONFIG["mcp_only_datasets"])
     if task_suite == "checkout":
-        return [{"path": "tasks/checkout-v1"}]
+        return [{"path": "tasks/checkout-v2"}]
     return copy.deepcopy(read_yaml("config/datasets.yaml").get("datasets", []))
 
 
@@ -948,13 +938,13 @@ def apply_task_filter(
         return config
 
     if any(
-        dataset.get("path") == "tasks/checkout-v1"
+        dataset.get("path") == "tasks/checkout-v2"
         for dataset in config.get("datasets", [])
     ):
         config["datasets"] = [
             {
-                "path": "tasks/checkout-v1",
-                "task_names": [task_filter.removeprefix("checkout-v1/")],
+                "path": "tasks/checkout-v2",
+                "task_names": [task_filter.removeprefix("checkout-v2/")],
             }
         ]
         return config
@@ -1030,7 +1020,7 @@ def redirect_dataset_paths(config: dict[str, Any], staging_root: Path) -> None:
         "tasks/mpp": str(staging_root / "tasks" / "mpp"),
         "tasks/tempo-v1": str(staging_root / "tasks" / "tempo-v1"),
         "tasks/tempo-mcp-v1": str(staging_root / "tasks" / "tempo-mcp-v1"),
-        "tasks/checkout-v1": str(staging_root / "tasks" / "checkout-v1"),
+        "tasks/checkout-v2": str(staging_root / "tasks" / "checkout-v2"),
         "tasks": str(staging_root / "tasks" / "tempo-v1"),
     }
     changed = False
@@ -1259,9 +1249,9 @@ def stage_task_datasets(
     checkout: bool = False,
 ) -> None:
     if checkout:
-        staged_checkout = staging_root / "tasks" / "checkout-v1"
+        staged_checkout = staging_root / "tasks" / "checkout-v2"
         staged_checkout.parent.mkdir(parents=True, exist_ok=True)
-        copy_tasks(Path("tasks/checkout-v1"), staged_checkout)
+        copy_tasks(Path("tasks/checkout-v2"), staged_checkout)
         if images is not None:
             override_staged_images(staging_root, images)
         return
@@ -1517,13 +1507,6 @@ def main(argv: list[str]) -> None:
 
 def run_benchmark_variant(variant_name: str, options: dict[str, Any]) -> None:
     variant = validate_run_options(variant_name, options)
-    if options.get(
-        "task_suite"
-    ) == "checkout" and "x402-usdc-checkout" in selected_checkout_tasks(options):
-        if options.get("concurrency") not in (None, "1"):
-            raise RuntimeError("x402 checkout runs require --concurrency 1")
-        options = options | {"concurrency": "1"}
-
     source = (
         {"mode": "live"}
         if uses_live_mcp_eval(options) or options.get("task_suite") == "checkout"
