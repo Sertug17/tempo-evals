@@ -1,7 +1,8 @@
 # Checkout Suite
 
-Planned dataset: `tempo/checkout-bench-v1`. The four merchant tasks have passed
-Daytona oracle validation but the dataset is not published. They can only be
+Planned dataset: `tempo/checkout-bench-v1`. Eight Harbor tasks cover four
+merchants with discover and directed prompts. The dataset is not published.
+Checkout tasks can only be
 selected with `--task-suite checkout` and are excluded from the default and
 `all` benchmark jobs.
 
@@ -9,14 +10,51 @@ selected with `--task-suite checkout` and are excluded from the default and
 
 An agent receives a request to buy a specific item from a test merchant. The
 instruction lists the payment capabilities available in the same benchmark
-wallet inventory for every task, but does not prescribe a method or disclose
-which methods the merchant accepts. The agent chooses a route and completes the
-purchase without a trial reset or human intervention.
+wallet inventory for every task. By default it does not prescribe a method or
+disclose which methods the merchant accepts. The agent chooses a route and
+completes the purchase without a trial reset or human intervention.
 
 The merchant and item define a Harbor task. Browser and tool configurations,
 agent/model pairs, and independent attempts belong in job configurations rather
-than duplicated task directories. The payment method used is an observed result,
-not an assigned task variant.
+than duplicated task directories. The payment method used is observed
+independently of the prompt condition.
+
+## Payment prompt pairs
+
+Every merchant has two native Harbor tasks in the same dataset:
+
+| Discover task | Directed task | Added instruction |
+| --- | --- | --- |
+| `stripe-card-discover` | `stripe-card-directed` | Use card to pay. |
+| `stripe-link-discover` | `stripe-link-directed` | Use Link to pay. |
+| `paypal-discover` | `paypal-directed` | Use PayPal to pay. |
+| `mpp-ousd-discover` | `mpp-ousd-directed` | Use MPP to pay. |
+
+The original four tasks are the authored sources. `config/tasks.yaml` declares
+peer names and method instructions; `npm run sync` generates their standalone
+directed task directories. Edit the source task to change a pair's merchant,
+wallet setup, oracle, verifier, or scoring. Only the task name, provenance marker,
+prompt-condition metadata, and added payment instruction differ within a pair.
+Generated task copies are marked as generated in GitHub diffs.
+
+`--task-suite checkout` runs all eight tasks, including oracle runs. Use
+`--task-filter '*-discover'` for discover only, `--task-filter '*-directed'`
+for directed only, or `--task-filter 'stripe-card-*'` for one merchant pair.
+No prompt-mode flag is required. Each task and attempt receives a separate
+Harbor environment, merchant instance, and funded wallet, including concurrent
+runs.
+
+Native `task.toml` fields record `scenario_id`, `prompt_condition`, and
+`required_method`. Preflight reuses the scenario identity for credential checks.
+Exports prefer the trial's staged task metadata and keep prompt conditions
+separate in task and suite quality summaries. MPP's method is `tempo_mpp`.
+
+`observed_method` comes from provider or receipt evidence, including failed
+checkouts. It is blank when unknown or when multiple methods were observed;
+`observed_methods` retains the full set as a JSON array. Observing a method does
+not imply success. The existing success-only `payment_method` column remains.
+Shared observation and grading code lives in `shared/checkout/tests/` and is
+copied into every checkout task by `npm run sync`.
 
 ## Task Contract
 
@@ -82,9 +120,9 @@ passed.
 
 ## Current merchants
 
-All four tasks request one Tempo Notebook for at most $12 and use the same
-purchase request and Playwright browser. Each trial wallet lists its prepared
-payment methods. The method to use is not named in the instruction. Each
+All four merchant scenarios request one Tempo Notebook for at most $12 and use
+the same purchase request and Playwright browser. Each trial wallet lists its
+prepared payment methods. Only directed prompts name the method to use. Each
 merchant runs in a trusted sidecar and exposes only its own checkout flow.
 
 Harbor starts a separate environment for each task and trial. In that
@@ -94,10 +132,10 @@ merchant through it.
 
 | Task | Payment surface | Independent proof |
 | --- | --- | --- |
-| `stripe-card-checkout` | Stripe Checkout card form | One paid card PaymentIntent and matching order |
-| `stripe-link-checkout` | Link Express Checkout button only | One paid Link PaymentIntent and matching order |
-| `mpp-ousd-checkout` | MPP OUSD paid endpoint only | One notebook delivery, successful MPP receipt, and exact trial-recipient OUSD balance |
-| `paypal-checkout` | Merchant PayPal checkout button and hosted sandbox buyer approval form | One completed PayPal order and capture |
+| `stripe-card-discover` | Stripe Checkout card form | One paid card PaymentIntent and matching order |
+| `stripe-link-discover` | Link Express Checkout button only | One paid Link PaymentIntent and matching order |
+| `mpp-ousd-discover` | MPP OUSD paid endpoint only | One notebook delivery, successful MPP receipt, and exact trial-recipient OUSD balance |
+| `paypal-discover` | Merchant PayPal checkout button and hosted sandbox buyer approval form | One completed PayPal order and capture |
 Every trial runs the same wallet, Link enrollment, and browser services before
 the agent starts. The wallet service creates a fresh Tempo testnet payer and
 confirms its faucet funding independently of other trials. Link enrollment

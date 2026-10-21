@@ -372,10 +372,17 @@ def preflight(variant: dict[str, Any], options: dict[str, Any]) -> None:
     if options.get("task_suite") == "checkout":
         if not has_checkout_tasks():
             raise RuntimeError("Checkout has no authored task yet")
-        selected = selected_checkout_tasks(options)
+        selected = {
+            tomlkit.parse((Path("tasks/checkout-v1") / name / "task.toml").read_text())[
+                "metadata"
+            ]
+            .get("scenario_id", f"checkout-v1/{name}")
+            .rsplit("/", 1)[-1]
+            for name in selected_checkout_tasks(options)
+        }
         if not os.environ.get("STRIPE_TEST_SECRET_KEY", "").startswith("sk_test_"):
             raise RuntimeError("Stripe checkout requires STRIPE_TEST_SECRET_KEY")
-        if "stripe-link-checkout" in selected and not os.environ.get(
+        if "stripe-link-discover" in selected and not os.environ.get(
             "STRIPE_TEST_PUBLISHABLE_KEY", ""
         ).startswith("pk_test_"):
             raise RuntimeError(
@@ -388,7 +395,7 @@ def preflight(variant: dict[str, Any], options: dict[str, Any]) -> None:
                 raise RuntimeError(
                     f"Checkout wallet setup requires {', '.join(missing)}"
                 )
-        if "paypal-checkout" in selected:
+        if "paypal-discover" in selected:
             required = ("PAYPAL_SANDBOX_CLIENT_ID", "PAYPAL_SANDBOX_CLIENT_SECRET")
             missing = [name for name in required if not os.environ.get(name)]
             if missing:

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import tomllib
 from datetime import datetime
+from functools import cache
 from math import comb
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,11 @@ TRIAL_COLUMNS = [
     "result_path",
 ]
 CHECKOUT_TRIAL_COLUMNS = [
+    "scenario_id",
+    "prompt_condition",
+    "required_method",
+    "observed_method",
+    "observed_methods",
     "checkout_stage",
     "payment_method",
     "payment_provider_type",
@@ -79,6 +86,7 @@ CHECKOUT_TRIAL_COLUMNS = [
     "trajectory_duration_sec",
     "quality_unavailable",
 ]
+CHECKOUT_SUMMARY_COLUMNS = ["scenario_id", "prompt_condition", "required_method"]
 
 SUMMARY_COLUMNS = [
     "run_id",
@@ -200,6 +208,33 @@ def parse_task_name(task_name: str, tempo_profile: str = "docs") -> dict[str, st
     if task_name.startswith("checkout-v1/"):
         return {"task_family": task_name, "profile": "browser-mcp"}
     return {"task_family": task_name, "profile": "unknown"}
+
+
+@cache
+def checkout_prompt_metadata(task_name: str, task_path: str = "") -> dict[str, str]:
+    """Read native task fields, preferring the task snapshot used by the run."""
+    root = Path(__file__).resolve().parents[1]
+    # A missing staged snapshot must not silently become a discover trial.
+    candidates = [root / task_path] if task_path else [root / "tasks" / task_name]
+    for directory in candidates:
+        if not directory.resolve().is_relative_to(root):
+            continue
+        try:
+            task = tomllib.loads((directory / "task.toml").read_text())
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        if task.get("task", {}).get("name") == task_name:
+            metadata = task.get("metadata", {})
+            if all(key in metadata for key in CHECKOUT_SUMMARY_COLUMNS):
+                return {
+                    key: as_string(metadata.get(key))
+                    for key in CHECKOUT_SUMMARY_COLUMNS
+                }
+    return {
+        "scenario_id": task_name,
+        "prompt_condition": "unknown",
+        "required_method": "",
+    }
 
 
 def result_docs_source(result: JsonObject, profile: str, context: JsonObject) -> str:
@@ -489,6 +524,18 @@ def parse_trial_result(file_path: Path, context: JsonObject) -> JsonObject | Non
         "rewards": rewards,
         **(
             {
+                **checkout_prompt_metadata(
+                    result["task_name"],
+                    as_string(
+                        as_object(as_object(result.get("config")).get("task")).get(
+                            "path"
+                        )
+                    ),
+                ),
+                "observed_method": as_string(checkout_details.get("observed_method")),
+                "observed_methods": json.dumps(
+                    checkout_details.get("observed_methods", [])
+                ),
                 "checkout_stage": as_string(checkout_details.get("checkout_stage")),
                 "payment_method": as_string(checkout_details.get("payment_method")),
                 "payment_provider_type": as_string(
@@ -513,7 +560,10 @@ def assign_attempt_indexes(rows: list[JsonObject]) -> list[JsonObject]:
     counts: dict[str, int] = {}
     sorted_rows = sorted(rows, key=lambda row: str(row["trial_name"]))
     for row in sorted_rows:
-        key = "\0".join([str(row["task_name"]), str(row["agent"]), str(row["model"])])
+        key = "\0".join(
+            str(row.get(field, ""))
+            for field in ("task_name", "agent", "model", "prompt_condition")
+        )
         counts[key] = counts.get(key, 0) + 1
         row["attempt_index"] = counts[key]
     return sorted_rows
@@ -561,6 +611,8 @@ def summarize_rows(rows: list[JsonObject]) -> list[JsonObject]:
     frame["_passed"] = frame["passed"].astype(int)
     frame["_eligible"] = frame["eligible"].astype(int)
     frame["_error"] = frame["exception_type"].astype(bool).astype(int)
+    checkout_columns = [key for key in CHECKOUT_SUMMARY_COLUMNS if key in frame]
+    frame[checkout_columns] = frame[checkout_columns].fillna("")
     for column in [
         "input_tokens",
         "cache_tokens",
@@ -573,7 +625,14 @@ def summarize_rows(rows: list[JsonObject]) -> list[JsonObject]:
     ]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0)
 
-    group_columns = ["model", "agent", "task_name", "task_family", "profile"]
+    group_columns = [
+        "model",
+        "agent",
+        "task_name",
+        "task_family",
+        "profile",
+        *checkout_columns,
+    ]
     summary = (
         frame.groupby(group_columns, as_index=False, sort=False)
         .agg(
@@ -610,7 +669,7 @@ def summarize_rows(rows: list[JsonObject]) -> list[JsonObject]:
     )
     for column in ("mean_quality", "median_quality", "quality_at_k"):
         summary[column] = summary[column].where(summary[column].notna(), "")
-    results = summary[SUMMARY_COLUMNS].to_dict("records")
+    results = summary[[*SUMMARY_COLUMNS, *checkout_columns]].to_dict("records")
     for result in results:
         if str(result["task_family"]).startswith("checkout-v1/"):
             n_trials = int(result["n_trials"])
@@ -633,6 +692,12 @@ def summarize_quality(rows: list[JsonObject]) -> list[JsonObject]:
     frame["_quality"] = pd.to_numeric(frame["quality"], errors="coerce")
     frame["_checkout"] = frame["task_family"].str.startswith("checkout-v1/")
     group_columns = ["run_id", "job_name", "model", "agent", "profile"]
+    columns = QUALITY_SUMMARY_COLUMNS
+    if frame["_checkout"].any():
+        # Directed and discover trials must never share a suite-level average.
+        frame["prompt_condition"] = frame["prompt_condition"].fillna("")
+        group_columns = [*group_columns, "prompt_condition"]
+        columns = [*columns, "prompt_condition"]
     task_quality = frame.groupby(
         [*group_columns, "task_family"], as_index=False, sort=False
     ).agg(quality_at_k=("_quality", "max"))
@@ -664,7 +729,7 @@ def summarize_quality(rows: list[JsonObject]) -> list[JsonObject]:
             & ~(summary["_checkout"] & (summary["quality_coverage"] < 1)),
             "",
         )
-    return summary[QUALITY_SUMMARY_COLUMNS].to_dict("records")
+    return summary[columns].to_dict("records")
 
 
 def write_summary_json(
@@ -739,12 +804,26 @@ def export_results(
         out_path / "summary.csv",
         [
             *SUMMARY_COLUMNS,
+            *(
+                CHECKOUT_SUMMARY_COLUMNS
+                if any("scenario_id" in row for row in summary)
+                else []
+            ),
             *(["pass_5"] if any("pass_5" in row for row in summary) else []),
         ],
         summary,
     )
     write_csv(
-        out_path / "quality_summary.csv", QUALITY_SUMMARY_COLUMNS, quality_summary
+        out_path / "quality_summary.csv",
+        [
+            *QUALITY_SUMMARY_COLUMNS,
+            *(
+                ["prompt_condition"]
+                if any("prompt_condition" in row for row in quality_summary)
+                else []
+            ),
+        ],
+        quality_summary,
     )
     write_summary_json(
         out_path / "summary.json",
