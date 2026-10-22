@@ -26,12 +26,36 @@ name = "checkout-v1/mpp-ousd-discover"
 digest = "sha256:41489c997c9a9ee5d770c5a195b16bc36420b520d0a80af25e1bffab3aab10b0"
 
 [[tasks]]
+name = "checkout-v1/mppcard-shipping-directed"
+digest = "sha256:fc945a3140768b999d6e940b82f6245c57a60a500b662e878f3b19ac55564d59"
+
+[[tasks]]
+name = "checkout-v1/mppcard-shipping-discover"
+digest = "sha256:f884f4d92f675963d42c7915943727eacb5c8f94a55433387644f7883d89b060"
+
+[[tasks]]
+name = "checkout-v1/mppousd-shipping-directed"
+digest = "sha256:218e5ce5bbfb68de3e926426df9c5465ddfe391b43580c2aa315abb7a434066a"
+
+[[tasks]]
+name = "checkout-v1/mppousd-shipping-discover"
+digest = "sha256:c9d597f087f5e5c6469c7ae6526beb3004ead724ce4350163ab9855c7674e80b"
+
+[[tasks]]
 name = "checkout-v1/paypal-directed"
 digest = "sha256:984776d9f6a7d3ab74a16db34c7d451e9da5a45e32d212e41297339b3a9d6613"
 
 [[tasks]]
 name = "checkout-v1/paypal-discover"
 digest = "sha256:9dbfcd28cf8de009e31ed5262fa7d3e9eaa2da8e3ae4c15cc2386dcdef9fb3f9"
+
+[[tasks]]
+name = "checkout-v1/paypal-shipping-directed"
+digest = "sha256:295049aee3c8e081a115e67e9a494238ad456ef5590734f0b7bee89a6dec6ae9"
+
+[[tasks]]
+name = "checkout-v1/paypal-shipping-discover"
+digest = "sha256:9fadbeab531314f92bd066ee935fd353360c732f5d05c70bf91ee46109bfd03b"
 
 [[tasks]]
 name = "checkout-v1/stripe-card-directed"
@@ -48,4 +72,20 @@ digest = "sha256:001944f6d738dd287fbfee1e5b8160f732983f03452b2916b4a76320df498fc
 [[tasks]]
 name = "checkout-v1/stripe-link-discover"
 digest = "sha256:e0351777ca8ce76326b22d65a6eaf1773b66221254e55d06048fc7e7b8d9de50"
+
+[[tasks]]
+name = "checkout-v1/stripecard-shipping-directed"
+digest = "sha256:50470036e62e3d7890a7d923454070e30a546ff61d6867325a3d9e28545ccca2"
+
+[[tasks]]
+name = "checkout-v1/stripecard-shipping-discover"
+digest = "sha256:d2b52ab5d624e611895fe89daccc446d873134883d8f9191b8424068c7f0734c"
+
+[[tasks]]
+name = "checkout-v1/stripelink-shipping-directed"
+digest = "sha256:4bd3fcadaa9b420af42d2fa15da934fb8013143824e71fcba8c165a4be654319"
+
+[[tasks]]
+name = "checkout-v1/stripelink-shipping-discover"
+digest = "sha256:00d1c255e1d473f8f88d006a7d155a52e78109dc9de56f5af57832fa054ff5ba"
 
