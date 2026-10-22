@@ -10,34 +10,42 @@ name = "Tempo Labs"
 
 
 [[tasks]]
+name = "checkout-v1/mpp-card-directed"
+digest = "sha256:7c52aceb93d169f6d5fb083677c1bd18370a1e36a0cbb22df8d2143fff67ff16"
+
+[[tasks]]
+name = "checkout-v1/mpp-card-discover"
+digest = "sha256:0ea32532db5a2a87701778ad362c4c3ea508344354bba677a4c694aed43cf18a"
+
+[[tasks]]
 name = "checkout-v1/mpp-ousd-directed"
-digest = "sha256:88a940258af45ccd7f87e3c13b45837160594e0e68702b0fa47923791c029594"
+digest = "sha256:902c801fdcb58ebe50eecf22122dc6858caaccc05d4e30fc43b9e5163eb1f90e"
 
 [[tasks]]
 name = "checkout-v1/mpp-ousd-discover"
-digest = "sha256:2fa86b0991205189e40ca52eef88ed672a893a2dd934a0f603e92368b914f498"
+digest = "sha256:41489c997c9a9ee5d770c5a195b16bc36420b520d0a80af25e1bffab3aab10b0"
 
 [[tasks]]
 name = "checkout-v1/paypal-directed"
-digest = "sha256:4dd7e02aa61becc637c27087540e59e2493a481cc7032888694cfa28c0f187a3"
+digest = "sha256:984776d9f6a7d3ab74a16db34c7d451e9da5a45e32d212e41297339b3a9d6613"
 
 [[tasks]]
 name = "checkout-v1/paypal-discover"
-digest = "sha256:c2bf5ee47e621255aa6e075b3895b89608b3ece61f9f6f48bbd9ac135809148c"
+digest = "sha256:9dbfcd28cf8de009e31ed5262fa7d3e9eaa2da8e3ae4c15cc2386dcdef9fb3f9"
 
 [[tasks]]
 name = "checkout-v1/stripe-card-directed"
-digest = "sha256:589029c8db1d8deaa6460bbe3a0345560d58eddf6a8f8ea56371d21e828792a0"
+digest = "sha256:eac14a9adf3364fd74154da9c1ccc7fbe97da568c682b0459a7af993d0b698ee"
 
 [[tasks]]
 name = "checkout-v1/stripe-card-discover"
-digest = "sha256:06d80d57ade3e1be068e603611e16391ece154b5bde23bc1920c127f0b7b3207"
+digest = "sha256:f63772351f4802dd4133caf4fe097dbcd3ea7f92f5806096f402d2575882f59d"
 
 [[tasks]]
 name = "checkout-v1/stripe-link-directed"
-digest = "sha256:17282a18c0e14dba3a253029b442f6d8b3dce6c96e4407609cebcaa17bc1511c"
+digest = "sha256:001944f6d738dd287fbfee1e5b8160f732983f03452b2916b4a76320df498fc2"
 
 [[tasks]]
 name = "checkout-v1/stripe-link-discover"
-digest = "sha256:9e4e7733e6adf2fc2161151b92966249da67cbb9de2e5d74c8501df9182c8b94"
+digest = "sha256:e0351777ca8ce76326b22d65a6eaf1773b66221254e55d06048fc7e7b8d9de50"
 
