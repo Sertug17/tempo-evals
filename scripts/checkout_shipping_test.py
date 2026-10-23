@@ -3,8 +3,11 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +26,55 @@ def load(path, name):
 
 
 class CheckoutShippingTest(unittest.TestCase):
+    def test_collection_retries_read_only_evidence_without_replaying_the_agent(self):
+        task = ROOT / "tasks/checkout-v1/paypal-discover/task.toml"
+        command = tomllib.loads(task.read_text())["verifier"]["collect"][0]["command"]
+        for mode in ("recover", "hang", "fail"):
+            with (
+                self.subTest(mode=mode),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                fake = root / "tsx"
+                fake.write_text(
+                    '#!/bin/sh\nprintf x >> "$COLLECTION_COUNT"\n'
+                    'if [ "$FAIL_ALWAYS" = 1 ]; then exit 1; fi\n'
+                    'if [ "$(cat "$COLLECTION_COUNT")" = x ]; then\n'
+                    '  if [ "$COLLECTION_HANG" = 1 ]; then exec sleep 10; fi\n'
+                    "  exit 1\nfi\n"
+                    'printf \'{"trusted":true}\' > "$COLLECTION_OUTPUT"\n'
+                )
+                fake.chmod(0o700)
+                # Shorten the container's GNU timeout for this host-only test.
+                bound = root / "timeout"
+                bound.write_text(
+                    "#!/usr/bin/env python3\nimport subprocess, sys\n"
+                    "try:\n"
+                    "    result = subprocess.run(sys.argv[4:], timeout=1)\n"
+                    "    sys.exit(result.returncode)\n"
+                    "except subprocess.TimeoutExpired:\n    sys.exit(124)\n"
+                )
+                bound.chmod(0o700)
+                result = subprocess.run(
+                    ["sh", "-c", command],
+                    env={
+                        "PATH": str(root)
+                        + ":"
+                        + str(Path(sys.executable).parent)
+                        + ":"
+                        + os.defpath,
+                        "COLLECTION_COUNT": str(root / "count"),
+                        "COLLECTION_OUTPUT": str(root / "snapshot.json"),
+                        "FAIL_ALWAYS": str(int(mode == "fail")),
+                        "COLLECTION_HANG": str(int(mode == "hang")),
+                    },
+                    capture_output=True,
+                    timeout=8,
+                )
+                self.assertEqual((root / "count").read_text(), "xx", result.stderr)
+                self.assertEqual(result.returncode, int(mode == "fail"))
+                self.assertEqual((root / "snapshot.json").exists(), mode != "fail")
+
     def test_each_payment_adapter_requires_the_paid_orders_exact_address(self):
         for slug in sync_shared.TASKS_CONFIG["checkout"]["directed"]:
             with self.subTest(merchant=slug):
