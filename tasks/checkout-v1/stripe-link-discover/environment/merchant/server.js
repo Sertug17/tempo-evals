@@ -1,7 +1,8 @@
 import { createShipping } from './shipping.js';
 const shipping = createShipping('/checkout');
 import http from 'node:http';
-import { mkdirSync, appendFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, appendFileSync, readFileSync } from 'node:fs';
 
 const key = process.env.STRIPE_TEST_SECRET_KEY;
 const publishableKey = process.env.STRIPE_TEST_PUBLISHABLE_KEY;
@@ -10,6 +11,11 @@ if (!key?.startsWith('sk_test_') || !publishableKey?.startsWith('pk_test_')) {
 }
 const log = '/var/log/checkout/intents.jsonl';
 mkdirSync('/var/log/checkout', { recursive: true });
+let records = [];
+try { records = readFileSync(log, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)); }
+catch (error) { if (error.code !== 'ENOENT') throw error; }
+const intents = new Map(records.map(record => [record.orderId, record.intentId]));
+const pending = new Map();
 
 function html(response, body) {
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(body);
@@ -63,6 +69,7 @@ http.createServer(async (request, response) => {
     const shippingOrder = shipping.get(request);
     if (!shippingOrder) return response.writeHead(400).end('Submit a shipping address first');
     const orderId = shippingOrder.id;
+    appendFileSync('/var/log/checkout/checkout-starts.jsonl', JSON.stringify({ orderId }) + '\n');
     const form = new URLSearchParams({
       amount: '1200',
       currency: 'usd',
@@ -73,17 +80,31 @@ http.createServer(async (request, response) => {
       'metadata[item]': 'Tempo Notebook',
     });
     try {
-      const stripe = await fetch('https://api.stripe.com/v1/payment_intents', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/x-www-form-urlencoded' },
-        body: form,
-        signal: AbortSignal.timeout(30000),
-      });
-      const intent = await stripe.json();
-      if (!stripe.ok || intent.livemode !== false || !intent.id?.startsWith('pi_') || !intent.client_secret) {
-        throw new Error(`Stripe intent creation failed: ${stripe.status}`);
+      let operation = pending.get(orderId);
+      if (!operation) {
+        operation = (async () => {
+          const existing = intents.get(orderId);
+          // A failed creation has not exposed a client secret, so its retry can use a fresh key.
+          const stripe = await fetch(`https://api.stripe.com/v1/payment_intents${existing ? `/${existing}` : ''}`, {
+            method: existing ? 'GET' : 'POST',
+            headers: { authorization: `Bearer ${key}`, 'content-type': 'application/x-www-form-urlencoded', ...(existing ? {} : { 'idempotency-key': `checkout-link-${orderId}-${randomUUID()}` }) },
+            body: existing ? undefined : form,
+            signal: AbortSignal.timeout(30000),
+          });
+          const intent = await stripe.json();
+          if (!stripe.ok || intent.livemode !== false || !intent.id?.startsWith('pi_') || !intent.client_secret) {
+            throw new Error(`Stripe intent creation failed: ${stripe.status}`);
+          }
+          if (!intents.has(orderId)) {
+            appendFileSync(log, JSON.stringify({ orderId, intentId: intent.id }) + '\n');
+            intents.set(orderId, intent.id);
+          }
+          return intent;
+        })().finally(() => pending.delete(orderId));
+        pending.set(orderId, operation);
       }
-      appendFileSync(log, JSON.stringify({ orderId, intentId: intent.id }) + '\n');
+      const intent = await operation;
+      if (intent.status === 'succeeded') return shipping.receipt(response, orderId);
       return html(response, paymentPage(intent.client_secret, orderId));
     } catch (error) {
       console.error(error);
