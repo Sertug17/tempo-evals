@@ -76,6 +76,12 @@ checkout:
       task: x402-usdc-directed
       method: x402
       instruction: Use x402 to pay.
+  # Cart store: the same payment adapters behind a multi-item catalog with
+  # variants, quantities and a budget-bound shipping choice. Sync generates
+  # directed cart tasks from these discover sources and shared/checkout/cart/.
+  cart:
+    stripe-card-discover: stripecard-cart-directed
+    mpp-ousd-discover: mppousd-cart-directed
   prepared:
     mpp-card-discover: mppcard-prepared-discover
     mpp-card-directed: mppcard-prepared-directed
